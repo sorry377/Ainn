@@ -1,11 +1,11 @@
-name: Deploy NEXRA Code AI Website
+name: Build and Deploy NEXRA Code AI
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - "NEXRA-Code-AI-Android.zip"
-      - ".github/workflows/deploy.yml"
+      - '**.zip'
+      - '.github/workflows/build.yml'
 
 permissions:
   contents: read
@@ -30,21 +30,60 @@ jobs:
       - name: Install unzip
         run: sudo apt-get update && sudo apt-get install -y unzip
 
-      - name: Extract project ZIP
+      - name: Find and extract project ZIP
+        shell: bash
         run: |
-          test -f NEXRA-Code-AI-Android.zip || {
-            echo "ไม่พบ NEXRA-Code-AI-Android.zip ที่ root ของ repository"
-            exit 1
-          }
-          mkdir extracted
-          unzip -q NEXRA-Code-AI-Android.zip -d extracted
+          set -euo pipefail
+          mkdir -p extracted
+
+          ZIP_FILE="NEXRA-Code-AI-Android.zip"
+
+          if [[ ! -f "$ZIP_FILE" ]]; then
+            mapfile -t ZIP_FILES < <(
+              find . -type f -iname '*.zip' \
+                ! -path './.git/*' \
+                ! -iname '*github-workflow*' \
+                -print | sort
+            )
+
+            if [[ "${#ZIP_FILES[@]}" -eq 1 ]]; then
+              ZIP_FILE="${ZIP_FILES[0]}"
+              echo "ใช้ไฟล์ ZIP: $ZIP_FILE"
+            elif [[ "${#ZIP_FILES[@]}" -eq 0 ]]; then
+              echo "::error::ไม่พบไฟล์ ZIP ใน Repository กรุณาอัปโหลด ZIP โปรเจกต์เข้า GitHub ก่อน"
+              echo "ไฟล์ที่พบใน Repository:"
+              find . -maxdepth 3 -type f -print | sort
+              exit 1
+            else
+              echo "::error::พบไฟล์ ZIP มากกว่า 1 ไฟล์ กรุณาเปลี่ยนชื่อ ZIP โปรเจกต์เป็น NEXRA-Code-AI-Android.zip"
+              printf '%s\n' "${ZIP_FILES[@]}"
+              exit 1
+            fi
+          fi
+
+          unzip -q "$ZIP_FILE" -d extracted
 
       - name: Prepare static website
+        shell: bash
         run: |
+          set -euo pipefail
+          WEB_INDEX="$(find extracted -type f -path '*/web/index.html' -print -quit)"
+
+          if [[ -z "$WEB_INDEX" ]]; then
+            echo "::error::ไม่พบ web/index.html ภายใน ZIP กรุณาตรวจสอบว่าเป็น ZIP โปรเจกต์ NEXRA Code AI"
+            echo "ไฟล์ที่แตกออกมา:"
+            find extracted -maxdepth 5 -type f -print | sort | head -200
+            exit 1
+          fi
+
+          WEB_DIR="$(dirname "$WEB_INDEX")"
           mkdir -p dist
-          test -f extracted/NEXRA-Code-AI/web/index.html
-          cp -R extracted/NEXRA-Code-AI/web/. dist/
+          cp -R "$WEB_DIR"/. dist/
           touch dist/.nojekyll
+
+          echo "เว็บไซต์พร้อมเผยแพร่จาก: $WEB_DIR"
+          echo "ไฟล์ที่นำขึ้น Pages:"
+          find dist -maxdepth 2 -type f -print | sort
 
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v3
